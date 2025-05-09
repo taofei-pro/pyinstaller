@@ -1,1 +1,0 @@
-Fix ``ModuleNotFoundError`` for ``scipy`` when provided by Debian's ``python3-scipy`` package.
