@@ -56,7 +56,7 @@ read -P 'If the bootloaders need to be rebuilt, now is the time to do it. Hit re
 
 function pyi_build_linux_bootloaders
     echo 'Building bootloaders for Linux. If this is the first time you\'ve done so on this machine then this will take a while.'
-    ./release/build-manylinux || return 1
+    ./release/linux-bootloaders || return 1
 end
 
 function pyi_build_wheels
