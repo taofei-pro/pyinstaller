@@ -1,3 +1,9 @@
+打包命令
+
+1. cd bootloader
+2. python ./waf all
+
+
 PyInstaller Overview
 ====================
 
