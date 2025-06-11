@@ -15,6 +15,82 @@ Changelog for PyInstaller
 
 .. towncrier release notes start
 
+6.13.0 (2025-04-15)
+-------------------
+
+Features
+~~~~~~~~
+
+* (macOS) When assembling the executable, PyInstaller now modifies the
+  Mach-O image UUID of all architecture slices in the executable, and
+  sets them to a value derived from the hash of the embedded PKG archive
+  and the original (bootloader's) UUID. This should ensure that different
+  application executables have unique identifiers, as per
+  `TN3178
+  <https://developer.apple.com/documentation/technotes/tn3178-checking-for-and-resolving-build-uuid-problems>`_,
+  which might be required by newer macOS features, such as
+  `local network privacy
+  <https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy#Build-time-considerations>`_.
+  (:issue:`9056`)
+* Extend analysis code so that when extension module is encountered, it
+  checks for the presence of an adjacent ``.py`` or ``.pyi`` file, and
+  if present, attempt to perform import analysis on such accompanying
+  source/interface file. (:issue:`9084`)
+
+
+Bugfix
+~~~~~~
+
+* (Windows) Fix (de)serialization of ``WORD``-typed fields in the
+  ``VersionInfo`` structure - it should be using 16-bit unsigned integer
+  format (``'H'``) instead of signed one (``'h'``). This, for example,
+  fixes the ``struct.error: 'h' format requires -32768 <= number <= 32767``
+  error when ``VersionInfo`` contains a ``VarFileInfo`` / ``VarStruct``
+  entry with the code page set to 65001. (:issue:`9086`)
+* Fix detection of ``setuptools``-vendored modules (i.e., not packages)
+  in the ``PyInstaller.utils.hooks.setuptools.SetuptoolsInfo`` hook utility
+  class; for example, the ``setuptools/_vendor/typing_extensions.py`` module.
+  (:issue:`9102`)
+
+
+Deprecations
+~~~~~~~~~~~~
+
+* Onefile in combination with macOS's .app bundles will be blocked in v7.0.
+  Onefile app bundles are not really single file and are heavily penalised by
+  macOS's security scanning. Please use onedir mode instead. (:issue:`9049`)
+
+
+Hooks
+~~~~~
+
+* Add hook for ``PyQt6.QtStateMachine`` that was introduced in ``PyQt6``
+  v6.8.1. (:issue:`9019`)
+* Fix ``ModuleNotFoundError`` for ``scipy`` when provided by Debian's
+  ``python3-scipy`` package. (:issue:`9069`)
+* Update hook for ``PyGObject`` (``gi``) and associated helper code to
+  support changes made in ``PyGObject`` v3.52 (switch from ``girepository-1.0``
+  to ``girepository-2.0``). (:issue:`9055`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* (Windows) Have the parent process of ``onefile`` application always
+  attempt to pre-load system copies of VC runtime DLLs, i.e.,
+  ``VCRUNTIME140.dll`` and ``VCRUNTIME140_1.dll``. This extends the
+  pre-load work-around from :issue:`8650` that aims to resolve issues
+  with bundled VC runtime DLLs not being cleaned up from the application's
+  temporary directory when 3rd party DLLs are injected into the process
+  (by the OS, an anti-virus program, or some 3rd party component).
+  (:issue:`9075`)
+* On POSIX systems other than macOS, use POSIX semaphore API instead of
+  SysV semaphore API to synchronize ``onefile`` parent and child process.
+  This restores the ability to compile bootloader under Termux, where
+  ``sys/sem.h`` (and the SysV semaphore API) is unavailable due to deliberate
+  lack of support for it in the underlying Android base. (:issue:`9089`)
+
+
 6.12.0 (2025-02-08)
 -------------------
 
@@ -1929,7 +2005,7 @@ Features
   ``PYI_LOG_LEVEL`` environment variable. (:issue:`7235`)
 * Support building native ARM applications for Windows. If PyInstaller is ran
   on
-  an ARM machine with an ARM build of Python, it will prodice an ARM
+  an ARM machine with an ARM build of Python, it will produce an ARM
   application. (:issue:`7257`)
 
 
@@ -2307,7 +2383,7 @@ Bugfix
 
 * (non-Windows) Avoid generating debug messages in POSIX signal handlers,
   as the functions involved are generally not signal-safe. Should also
-  fix the endless spam of ``SIGPIPE`` that ocurrs under certain conditions
+  fix the endless spam of ``SIGPIPE`` that occurs under certain conditions
   when shutting down the frozen application on linux. (:issue:`5270`)
 * (non-Windows) If the child process of a ``onefile`` frozen application
   is terminated by a signal, delay re-raising of the signal in the parent
@@ -2799,7 +2875,7 @@ Bugfix
 * Fix handling of encodings when reading the collected .py source files
   via ``FrozenImporter.get_source()``. (:issue:`6143`)
 * Fix hook loader function not finding hooks if path has whitespaces.
-  (Re-apply the fix that has been inadvertedly undone during the
+  (Re-apply the fix that has been inadvertently undone during the
   codebase reformatting.) (:issue:`6080`)
 * Windows: Prevent invalid handle errors when an application compiled in
   :option:`--windowed` mode uses :mod:`subprocess`
@@ -3067,7 +3143,7 @@ Bugfix
   WARNING. (:issue:`6015`)
 * Fix a bytecode parsing bug which caused tuple index errors whilst scanning
   modules which use :mod:`ctypes`. (:issue:`6007`)
-* Fix an error when rhtooks for ``pkgutil`` and ``pkg_resources`` are used
+* Fix an error when rthooks for ``pkgutil`` and ``pkg_resources`` are used
   together. (:issue:`6018`)
 * Fix architecture detection on Apple M1 (:issue:`6029`)
 * Fix crash in windowed bootloader when the traceback for unhandled exception
@@ -3260,7 +3336,7 @@ Bugfix
   misidentified as having one, which leads to undefined behavior in frozen
   applications with side-loaded CArchive packages. (:issue:`5762`)
 * Prevent the use of ``sys`` or ``os`` as variables in the global namespace
-  in frozen script from affecting the ``ctypes`` hooks thar are installed
+  in frozen script from affecting the ``ctypes`` hooks that are installed
   during bootstrap. (:issue:`5797`)
 * Windows: Fix EXE being rebuilt when there are no changes. (:issue:`5921`)
 
@@ -3614,7 +3690,7 @@ Bugfix
   module. (:issue:`5157`)
 * Remove duplicate logging messages (:issue:`5277`)
 * Fix sw_64 architecture support (:issue:`5296`)
-* (AIX) Include python-malloc labeled libraries in search for libpython.
+* (AIX) Include python-malloc labelled libraries in search for libpython.
   (:issue:`4210`)
 
 
@@ -3628,20 +3704,20 @@ Hooks
 * Add hook for difflib to not pull in doctests, which is only
   required when run as main program.
 * Add hook for distutils.util to not pull in lib2to3 unittests, which will be
-  rearly used in frozen packages.
+  rarely used in frozen packages.
 * Add hook for heapq to not pull in doctests, which is only
   required when run as main program.
 * Add hook for multiprocessing.util to not pull in python test-suite and thus
   e.g. tkinter.
 * Add hook for numpy._pytesttester to not pull in pytest.
-* Add hook for pickle to not pull in doctests and argpargs, which are only
+* Add hook for pickle to not pull in doctests and argparse, which are only
   required when run as main program.
 * Add hook for PIL.ImageFilter to not pull
   numpy, which is an optional component.
 * Add hook for setuptools to not pull in numpy, which is only imported if
   installed, not mean to be a dependency
 * Add hook for zope.interface to not pull in pytest unittests, which will be
-  rearly used in frozen packages.
+  rarely used in frozen packages.
 * Add hook-gi.repository.HarfBuzz to fix Typelib error with Gtk apps.
   (:issue:`5133`)
 * Enable overriding Django settings path by `DJANGO_SETTINGS_MODULE`
@@ -3710,7 +3786,7 @@ Bootloader
 Documentation
 ~~~~~~~~~~~~~
 
-* Add zlib to build the requirements in the Building the Bootlooder section of
+* Add zlib to build the requirements in the Building the Bootloader section of
   the docs. (:issue:`5130`)
 
 
@@ -3721,10 +3797,10 @@ PyInstaller Core
   (:issue:`4406`, :issue:`5156`)
 * Prevent a local directory with clashing name from shadowing a system library.
   (:issue:`5182`)
-* Use module loaders to get module content instea of an quirky way semming from
+* Use module loaders to get module content instead of an quirky way stemming from
   early Python 2.x times. (:issue:`5157`)
 * (OSX) Exempt the ``Tcl``/``Tk`` dynamic libraries in the system framework
-  from relative path overwrite. Fix missing ``Tcl``/``Tk`` dynlib on older
+  from relative path overwrite. Fix missing ``Tcl``/``Tk`` dylib on older
   python.org builds that still make use of the system framework.
   (:issue:`5172`)
 
@@ -3785,11 +3861,11 @@ Features
 Bugfix
 ~~~~~~
 
-* (AIX) Include python-malloc labeled libraries in search for libpython.
+* (AIX) Include python-malloc labelled libraries in search for libpython.
   (:issue:`4738`)
 * (win32) Fix Security Alerts caused by subtle implementation differences
-  between posix anf windows in ``os.path.dirname()``. (:issue:`4707`)
-* (win32) Fix struct format strings for versioninfo. (:issue:`4861`)
+  between posix and windows in ``os.path.dirname()``. (:issue:`4707`)
+* (win32) Fix struct format strings for VersionInfo. (:issue:`4861`)
 * (Windows) cv2: bundle the `opencv_videoio_ffmpeg*.dll`, if available.
   (:issue:`4999`)
 * (Windows) GLib: bundle the spawn helper executables for `g_spawn*` API.
