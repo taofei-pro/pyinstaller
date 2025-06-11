@@ -351,7 +351,7 @@ class SplashWriter:
     #     uint64_t requirements_offset;
     # } SPLASH_DATA_HEADER;
     #
-    _HEADER_FORMAT = "!16s 16s 16s QQ QQ QQ"
+    _HEADER_FORMAT = '!32s 32s 16s II II II'
     _HEADER_LENGTH = struct.calcsize(_HEADER_FORMAT)
 
     # The created archive is compressed by the CArchive, so no need to compress the data here.
@@ -424,8 +424,8 @@ class SplashWriter:
                 enc_value = value.encode("utf-8")
                 if len(enc_value) >= limit:
                     raise ValueError(
-                        f"Length of the encoded field {field_name!r} is greater or equal to the limit of {limit} "
-                        "characters!"
+                        f"Length of the encoded field {field_name!r} ({len(enc_value)}) is greater or equal to the "
+                        f"limit of {limit} characters!"
                     )
 
                 return enc_value
@@ -433,9 +433,15 @@ class SplashWriter:
             # Write header
             header_data = struct.pack(
                 self._HEADER_FORMAT,
+<<<<<<< HEAD
                 _encode_str(tcl_libname, "tcl_libname", 16),
                 _encode_str(tk_libname, "tk_libname", 16),
                 _encode_str(tklib, "tklib", 16),
+=======
+                _encode_str(tcl_libname, 'tcl_libname', 32),
+                _encode_str(tk_libname, 'tk_libname', 32),
+                _encode_str(tklib, 'tklib', 16),
+>>>>>>> v6.14.1
                 script_len,
                 script_offset,
                 image_len,

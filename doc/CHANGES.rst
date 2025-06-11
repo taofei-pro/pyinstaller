@@ -15,6 +15,132 @@ Changelog for PyInstaller
 
 .. towncrier release notes start
 
+6.14.1 (2025-06-08)
+-------------------
+
+Hooks
+~~~~~
+
+* Update the ``numpy`` hook for compatibility with NumPy v2.3.0.
+  (:issue:`9162`)
+
+
+6.14.0 (2025-06-03)
+-------------------
+
+Bugfix
+~~~~~~
+
+* (AIX) Fix the name of Tcl and Tk shared libraries used by splash screen;
+  if said shared libraries are ``.a`` archives, we need to load the shared
+  object from the archives (e.g., ``libtcl.a(libtcl.so.8.6)`` and
+  ``libtk.a(libtk.so.8.6)``). (:issue:`9111`)
+* (AIX) Fix use of ``strip`` utility on collected binaries; pass the
+  ``-x32_64``
+  flag to enable transparent processing of either 32-bit or 64-bit binaries.
+  Suppress warnings on ``strip`` errors when a collected binary is already
+  stripped. (:issue:`9111`)
+* (Windows) Fix collection of DLLs from Anaconda-installed ``numpy`` and
+  its dependencies (MKL, OpenBLAS, TBB, etc.) when the file paths recorded
+  in the metadata end up using Windows-style separators instead of POSIX
+  ones. (:issue:`9113`)
+* Fix behavior of :option:`--add-data` and :option:`--add-binary` when the
+  given source path contains a glob that matches directories. PyInstaller
+  now collects the matched directories themselves into the specified target
+  directory instead of collecting their content into the specified target
+  directory (i.e., the directories are preserved). This ensures that
+  ``--add-data data_dir:data_dir`` and ``--add-data data_dir/*:data_dir``
+  end up behaving in the same way when the data directory contains
+  sub-directories. (:issue:`9108`)
+* The ``Analysis()`` class now keeps track of pure-python modules that are not
+  collected into PYZ archive (i.e., are not listed in the ``Analysis.pure``
+  TOC list); the corresponding entries are added to a separate TOC list
+  that is also under modification-time check, which allows us to detect
+  modifications and re-run the analysis. (:issue:`9135`)
+* When collecting files for splash screen, suppress warning about
+  ``license.terms`` not being found in the ``tk8.x`` directory; this seems
+  to be the case in most Tcl/Tk installations found on POSIX systems.
+  (:issue:`9111`)
+
+
+Hooks
+~~~~~
+
+* Add pre-safe-import-module hook for ``gi.overrides`` to properly handle
+  cases where the ``gi.overrides`` package is split between
+  ``/usr/lib64/python3.X/site-packages/gi/overrides`` and
+  ``/usr/lib/python3.X/site-packages/gi/overrides`` (i.e., RPM packages
+  for Fedora/RHEL and their derivatives, such as openEuler). (:issue:`9126`)
+* Have the ``pytz`` hook exclude ``pkg_resources``, to prevent the latter
+  from being collected due to a reference in the fallback resource
+  loading codepath in ``pytz`` that should normally not be reached.
+  (:issue:`9154`)
+* Remove the hook for ``packaging``; the only function of this hook was
+  to add ``pkg_resources`` to hidden imports, which nowadays results in
+  ``pkg_resources`` (and our run-time hook for it) being unnecessarily
+  collected into frozen application and, with up-to-date ``setuptools``
+  triggers a deprecation warning at run-time. (:issue:`9151`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* (Linux) The bootloader now preserves its original process name (for example,
+  when executable is symlinked with different basename) when the ``onedir``
+  process restarts itself for the library-search-path changes to take affect.
+  The original process name is now also propagated to sub-processes that are
+  spawned using the same executable (for example, using Python's
+  :mod:`subprocess` module and :data:`sys.executable`). (:issue:`9118`)
+* (POSIX) On POSIX systems where library search path is set by modifying
+  ``LD_LIBRARY_PATH`` environment variable (or equivalent), the parent
+  process of ``onefile`` application with enabled splash screen now
+  restarts itself, in order to apply library search path modification
+  before splash screen is started and Tcl/Tk shared libraries are loaded.
+  This ensures that bundled dependencies of Tcl/Tk shared libraries can
+  be discovered and loaded, instead of having to rely on system copies
+  being available. (:issue:`9118`)
+
+
+Module Loader
+~~~~~~~~~~~~~
+
+* Have the ``PyiFrozenLoader`` use the .py suffix instead of .pyc one
+  for module's file path (the file path stored in the loader's ``path``
+  attribute and the module's ``__file__`` attribute). This should improve
+  compatibility with 3rd party code that assumes that the module's
+  ``__file__`` attribute points to the source .py file; odd-case scenarios
+  such as checking for file's existence, trying to query its creation time
+  or trying to read it as a source file can now be accommodated by simply
+  collecting the source .py files, rather than also having to exclude the
+  byte-compiled module from the PYZ archive. (:issue:`9141`)
+
+
+Documentation
+~~~~~~~~~~~~~
+
+* Update documentation about building bootloader on AIX; add a note about
+  ``/opt/freeware/gcc`` from *AIX Toolbox for Open Source Software* not
+  honoring the :envvar:`OBJECT_MODE` environment variable. (:issue:`9111`)
+
+
+Bootloader build
+~~~~~~~~~~~~~~~~
+
+* (AIX) Pass ``-X32_64`` flag to ``strip`` utility to have it transparently
+  process either 32-bit or 64-bit executable, without user having to explicitly
+  set the :envvar:`OBJECT_MODE` environment variable. (:issue:`9111`)
+* Prevent the ``strip`` utility from being ran twice when building bootloader
+  executables; fixes errors with ``strip`` utilities that disallow being
+  ran against already-stripped binaries (for example, the ``strip`` utility
+  on AIX). (:issue:`9111`)
+* Remove duplicated check for the ``strip`` utility. (:issue:`9111`)
+* When building bootloader with a cross-compiler toolchain, have the build
+  script look for toolchain-provided version of ``strip`` utility (for
+  example, ``powerpc64le-linux-gnu-strip`` that is shipped with
+  ``powerpc64le-linux-gnu-gcc``) and prefer it over the system-provided one.
+  (:issue:`9111`)
+
+
 6.13.0 (2025-04-15)
 -------------------
 

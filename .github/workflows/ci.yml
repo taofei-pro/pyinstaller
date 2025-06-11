@@ -36,7 +36,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.13t']
         os: ['windows-latest', 'ubuntu-24.04', 'macos-13', 'macos-14']
         # Split macOS workflows between macos-13 (x86_64) and macos-14 (arm64)
         # runners to cover both architectures without running all combinations.
@@ -214,8 +214,12 @@ jobs:
         run: |
           python -m pip install --progress-bar=off --upgrade --requirement tests/requirements-base.txt
 
+      # Give python 3.13t same treatment as development version and avoid trying to install packges
+      # from requirements-libraries.txt. This is necessary because not all packages provide free-threaded
+      # builds of their wheels yet, and we have no way of filtering them in the requirements file.
+      # This should be remedied in python 3.14 with the new `sys_abi_feature` environment marker (PEP 780).
       - name: Install test dependencies (tools and libraries)
-        if: ${{ !endsWith(matrix.python-version, '-dev') }}
+        if: ${{ !endsWith(matrix.python-version, '-dev') && matrix.python-version != '3.13t' }}
         run: |
           python -m pip install --progress-bar=off --upgrade --requirement tests/requirements-libraries.txt
 
@@ -386,13 +390,13 @@ jobs:
             mingw-w64-${{matrix.env}}-python-pytest-xdist
             mingw-w64-${{matrix.env}}-python-pytest-timeout
             mingw-w64-${{matrix.env}}-python-pywin32
-            mingw-w64-${{matrix.env}}-python-pillow
             mingw-w64-${{matrix.env}}-python-gobject
 
       # Some msys2 python packages are not available for i686 anymore:
       #  - numpy
       #  - pefile
       #  - psutil (removed with update to psutil 6.1.1; see https://github.com/msys2/MINGW-packages/commit/7f1c75b33a5aebb89899f99f5fa656c623eeb9ed)
+      #  - pillow (see https://github.com/msys2/MINGW-packages/commit/a7d88c34aa36adce78ba71633711412a24d8792c)
       # If running in 64-bit environment, install the said packages here.
       # Otherwise, we will run tests without these packages (note that
       # if not installed here, `pefile` will end up installed via `pip`
@@ -404,6 +408,7 @@ jobs:
           mingw-w64-${{matrix.env}}-python-numpy
           mingw-w64-${{matrix.env}}-python-pefile
           mingw-w64-${{matrix.env}}-python-psutil
+          mingw-w64-${{matrix.env}}-python-pillow
 
       - name: Checkout PyInstaller code
         uses: actions/checkout@v4
