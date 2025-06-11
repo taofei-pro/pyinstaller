@@ -433,15 +433,9 @@ class SplashWriter:
             # Write header
             header_data = struct.pack(
                 self._HEADER_FORMAT,
-<<<<<<< HEAD
-                _encode_str(tcl_libname, "tcl_libname", 16),
-                _encode_str(tk_libname, "tk_libname", 16),
-                _encode_str(tklib, "tklib", 16),
-=======
                 _encode_str(tcl_libname, 'tcl_libname', 32),
                 _encode_str(tk_libname, 'tk_libname', 32),
                 _encode_str(tklib, 'tklib', 16),
->>>>>>> v6.14.1
                 script_len,
                 script_offset,
                 image_len,
