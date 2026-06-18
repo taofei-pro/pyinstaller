@@ -12,6 +12,7 @@
 import os
 import pathlib
 import sys
+import subprocess
 import json
 
 import pytest
@@ -196,16 +197,20 @@ def test_single_file_metadata(pyi_builder):
 
     pyi_builder.test_source(
         """
-        import pkg_resources
+        import sys
+        if sys.version_info >= (3, 10):
+            import importlib.metadata as importlib_metadata
+        else:
+            import importlib_metadata
 
-        # The pkg_resources.get_distribution() call automatically triggers collection of the metadata. While it does not
-        # raise an error if metadata is not found while freezing, the calls below will fall at run-time in that case.
-        dist = pkg_resources.get_distribution('my-test-package')
+        # The `importlib_metadata.distribution()` call automatically triggers collection of the metadata.
+        # While it does not raise an error if metadata is not found while freezing, the calls below will fall at
+        # run-time in that case.
+        dist = importlib_metadata.distribution('my-test-package')
 
         # Sanity check
-        assert dist.project_name == 'my-test-package'
+        assert dist.name == 'my-test-package'
         assert dist.version == '1.0'
-        assert dist.egg_name() == f'my_test_package-{dist.version}-py{sys.version_info[0]}.{sys.version_info[1]}'
         """,
         pyi_args=['--paths', str(extra_path)]
     )
@@ -213,6 +218,10 @@ def test_single_file_metadata(pyi_builder):
 
 # Test that we can successfully package a program even if one of its modules contains non-ASCII characters in a local
 # (non-UTF8) encoding and fails to declare such encoding using PEP361 encoding header.
+#
+# Python versions prior to 3.14.1 are able to import such modules; however, starting with python 3.14.1, a SyntaxError
+# is raised. See: https://github.com/python/cpython/commit/9ff705c
+@pytest.mark.skipif(sys.version_info >= (3, 14, 1), reason="python >= 3.14.1 disallows invalid characters")
 def test_program_importing_module_with_invalid_encoding1(pyi_builder):
     # Add directory containing the my-test-package metadata to search path
     extra_path = _MODULES_DIR / "pyi_module_with_invalid_encoding"
@@ -226,6 +235,7 @@ def test_program_importing_module_with_invalid_encoding1(pyi_builder):
     )
 
 
+@pytest.mark.skipif(sys.version_info >= (3, 14, 1), reason="python >= 3.14.1 disallows invalid characters")
 def test_program_importing_module_with_invalid_encoding2(pyi_builder):
     # Add directory containing the my-test-package metadata to search path
     extra_path = _MODULES_DIR / "pyi_module_with_invalid_encoding"
@@ -246,7 +256,13 @@ def test_program_importing_module_with_invalid_encoding2(pyi_builder):
 def test_bundled_shell_script(pyi_builder, tmp_path):
     script_file = tmp_path / "test_script.sh"
     with open(script_file, "w", encoding="utf-8") as fp:
-        print('#!/bin/sh', file=fp)
+        if compat.is_termux:
+            # In Termux environment, /usr is usually a symbolic link to ${PREFIX}; but it may also not exist. So use
+            # ${PREFIX} directly...
+            prefix = os.environ.get('PREFIX', '/usr')
+            print(f'#!{prefix}/bin/env sh', file=fp)
+        else:
+            print('#!/usr/bin/env sh', file=fp)
         print('echo "Hello world!"', file=fp)
     script_file.chmod(0o755)
 
@@ -465,3 +481,103 @@ def test_recursive_add_data(pyi_builder, scenario):
         pyi_args=['--add-data', f'{add_data_arg!s}:data-dir'],
         app_args=[*expected_files],
     )
+
+
+# Ensure that time.sleep() works as expected in the frozen application. See #8104, #9225.
+# Separately test console/windowed builds, as they have (slightly) different bootloaders.
+@pytest.mark.parametrize('windowed', [False, True], ids=['console', 'windowed'])
+def test_time_sleep(pyi_builder, windowed):
+    pyi_builder.test_source(
+        """
+        import sys
+        import time
+        import datetime
+
+        ITERATIONS = 5
+        DELAY = 1  # seconds
+        TOL = 50  # milliseconds
+
+        elapsed = []
+        for i in range(ITERATIONS):
+            print(f"Iteration #{i+1} at {datetime.datetime.now()}", file=sys.stderr)
+            start_time = time.monotonic()
+            time.sleep(DELAY)
+            elapsed.append(time.monotonic() - start_time)
+
+        print("Elapsed times (monotonic clock):", file=sys.stderr)
+
+        test_ok = True
+        for idx, value in enumerate(elapsed):
+            delta = (value - DELAY) * 1000  # ms
+
+            # We are trying to catch cases when the elapsed time interval is *shorter* than the requested delay, which
+            # indicates mis-behaving time.sleep() as per #8104. Typically the elapsed time interval is a bit longer than
+            # the requested delay, but the delta varies depending on system scheduling and load.
+            if delta < 0 and abs(delta) >= TOL:
+                status = 'TOO SHORT'
+                test_ok = False
+            else:
+                status = 'OK'
+
+            print(f" - #{idx+1}: {value:.6f} s, delta: {delta:.4f} ms ({status})", file=sys.stderr)
+
+        if test_ok:
+            print("Test passed.", file=sys.stderr)
+        else:
+            print("Test failed.", file=sys.stderr)
+            sys.exit(1)
+        """,
+        pyi_args=['--windowed'] if windowed else [],
+    )
+
+
+# Test that on Windows, values of dwFlags and wShowWindow fields in STATRTUPINFO structure are propagated into onefile
+# child process. Onedir variant serves as sanity check. See #9342.
+@pytest.mark.win32
+@pytest.mark.parametrize('windowed', [False, True], ids=['console', 'windowed'])
+def test_startupinfo_flags(pyi_builder, tmp_path, windowed):
+    pyi_builder.test_script(
+        'pyi_get_startupinfo_flags.py',
+        pyi_args=['--windowed'] if windowed else [],
+    )
+
+    # Find executable
+    exes = pyi_builder._find_executables('pyi_get_startupinfo_flags')
+    assert len(exes) == 1
+    program_exe = exes[0]
+
+    # Re-run with various flag combinations
+    TEST_FLAGS = (
+        (False, 0),
+        (True, 0),  # SW_HIDE
+        (True, 1),  # SW_NORMAL
+        (True, 6),  # SW_MINIMIZE
+    )
+
+    for i in range(len(TEST_FLAGS)):
+        enabled, value = TEST_FLAGS[i]
+        print(
+            f"=== running test variant #{i + 1}: STARTF_USESHOWWINDOW={enabled}, wShowWindow={value} ===",
+            file=sys.stderr,
+        )
+
+        output_file = tmp_path / f'output{i}.json'
+
+        si = subprocess.STARTUPINFO()
+        if enabled:
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = value
+
+        subprocess.run([program_exe, output_file], check=True, startupinfo=si)
+
+        with open(output_file, 'r') as fp:
+            results = json.load(fp)
+
+        if enabled:
+            assert (results['dwFlags'] & subprocess.STARTF_USESHOWWINDOW) != 0, \
+                'dwFlags does not contain STARTF_USESHOWWINDOW, but it should!'
+            assert results['wShowWindow'] == value, \
+                f"Unexpected wShowWindow value - expected {value}, found {results['wShowWindow']}!"
+        else:
+            assert (results['dwFlags'] & subprocess.STARTF_USESHOWWINDOW) == 0, \
+                'dwFlags contains STARTF_USESHOWWINDOW, but it should not!'

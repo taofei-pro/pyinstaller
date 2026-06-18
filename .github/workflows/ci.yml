@@ -1,17 +1,10 @@
 name: CI
 
-# Controls when the action will run. Triggers the workflow on push or pull request
-# events for develop and v4 branche.
 on:
-  push:
+  workflow_dispatch:  # Allow workflow to be manually triggered
+  pull_request:  # Trigger on PRs opened against develop branch
     branches:
-      - 'develop'
-      - 'v4'
-  pull_request:
-    branches:
-      - '**'
-      - '!master'
-      - '!pyup/**'
+      - develop
 
 env:
   # Colored pytest output on CI despite not having a tty
@@ -36,9 +29,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.13t']
-        os: ['windows-latest', 'ubuntu-24.04', 'macos-13', 'macos-14']
-        # Split macOS workflows between macos-13 (x86_64) and macos-14 (arm64)
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13', '3.14', '3.15-dev']
+        os: ['windows-latest', 'ubuntu-24.04', 'macos-15-intel', 'macos-14']
+        # Split macOS workflows between macos-15-intel (x86_64) and macos-14 (arm64)
         # runners to cover both architectures without running all combinations.
         exclude:
           - python-version: '3.8'
@@ -47,21 +40,26 @@ jobs:
             os: 'macos-14'
           - python-version: '3.12'
             os: 'macos-14'
+          - python-version: '3.14'
+            os: 'macos-14'
           - python-version: '3.9'
-            os: 'macos-13'
+            os: 'macos-15-intel'
           - python-version: '3.11'
-            os: 'macos-13'
+            os: 'macos-15-intel'
           - python-version: '3.13'
-            os: 'macos-13'
+            os: 'macos-15-intel'
+          - python-version: '3.15-dev'
+            os: 'macos-15-intel'
       fail-fast: false
     steps:
       - name: Checkout PyInstaller code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
+          check-latest: true
 
       - name: Install apt packages
         if: startsWith(matrix.os, 'ubuntu')
@@ -117,7 +115,7 @@ jobs:
 
       - name: Fetch cache
         id: cache-target
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ env.pip_cache_dir }}
           key: ${{ runner.os }}-${{ matrix.python-version }}
@@ -148,51 +146,7 @@ jobs:
             ls ../PyInstaller/bootloader/Windows-64bit-arm
 
       - name: Update pip
-        run: python -m pip install --upgrade pip setuptools build
-
-      # On (macos-14, python 3.10), (macos-13, python 3.11) and (macos-14, python 3.11)
-      # combinations the initial `setuptools` installation seems to contain `.opt-1.pyc`
-      # files in `__pycache__` directories. During the upgrade, `pip` fails to remove
-      # those directories (https://github.com/pypa/pip/issues/11835).
-      #
-      # `setuptools` 75.4 removed its vendored copy of `importlib_resources`, but due to
-      # the above issue, the effectively empty directory remains, turning `importlib_resources`
-      # into defunct namespace package, which causes some of our tests to fail.
-      - name: Work around potentially broken setuptools upgrade
-        shell: python
-        run: |
-          import sys
-          import pathlib
-          import shutil
-          import importlib.util
-
-          spec = importlib.util.find_spec('setuptools._vendor.importlib_resources')
-          if spec is None:
-            print("Did not find setuptools-vendored copy of importlib_resources.")
-            sys.exit(0)
-          elif spec.loader is not None:
-            print("Found a valid setuptools-vendored copy of importlib_resources.")
-            sys.exit(0)
-
-          print("Found a defunct setuptools-vendored copy of importlib_resources!")
-
-          # List the contents of importlib_resources package directory for debug purposes
-          def list_directory(path, pad=""):
-            for child in path.iterdir():
-              if child.is_dir():
-                print(f"{pad} + {child.name}")
-                list_directory(child, pad + " ")
-              else:
-                print(f"{pad} - {child.name} ({child.stat().st_size} bytes)")
-
-          for path in spec.submodule_search_locations:
-            print(f"Listing contents of {path}")
-            list_directory(pathlib.Path(path))
-
-          # Remove
-          for path in spec.submodule_search_locations:
-            print(f"Removing {path}...")
-            shutil.rmtree(path)
+        run: python -m pip install --upgrade pip hatchling
 
       - name: Compile bootloader
         run: cd bootloader && python waf --tests all
@@ -222,6 +176,66 @@ jobs:
         if: ${{ !endsWith(matrix.python-version, '-dev') && matrix.python-version != '3.13t' }}
         run: |
           python -m pip install --progress-bar=off --upgrade --requirement tests/requirements-libraries.txt
+
+      # Some python versions come with initial `setuptools` installation that seems to contain `.opt-1.pyc`
+      # files in `__pycache__` directories. During the upgrade, `pip` fails to remove those directories
+      # (see: https://github.com/pypa/pip/issues/11835).
+      #
+      # `setuptools` 75.4 removed its vendored copy of `importlib_resources`, but due to
+      # the above issue, the effectively empty directory remains, turning `importlib_resources`
+      # into a defunct namespace package, which causes some of our tests to fail.
+      #
+      # Similar issue arises when upgrading to `setuptools` 82.0.0, which removed `pkg_resources` package;
+      # the defunct namespace package arising from the left-over directory causes error in our `pkg_resources`
+      # run-time hook (which would otherwise not be collected at all).
+      - name: Work around potentially broken setuptools upgrade
+        shell: python
+        run: |
+          import sys
+          import pathlib
+          import shutil
+          import importlib.util
+
+          PACKAGES = [
+            'setuptools._vendor.importlib_resources',
+            'pkg_resources',
+          ]
+
+          def fix_package(package_name):
+            try:
+              spec = importlib.util.find_spec(package_name)
+            except ImportError:
+              spec = None  # parent package (e.g., setuptools or setuptools._vendor) does not exist
+            if spec is None:
+              print(f"Did not find {package_name}.")
+              return
+            elif spec.loader is not None:
+              # Not a namespace package (i.e., directory with just __pycache__ sub-directory)
+              print(f"Found a valid copy of {package_name}.")
+              return
+
+            print(f"Found a defunct copy of {package_name}!")
+
+            # List the contents of package directory for debug purposes
+            def list_directory(path, pad=""):
+              for child in path.iterdir():
+                if child.is_dir():
+                  print(f"{pad} + {child.name}")
+                  list_directory(child, pad + " ")
+                else:
+                  print(f"{pad} - {child.name} ({child.stat().st_size} bytes)")
+
+            for path in spec.submodule_search_locations:
+              print(f"Listing contents of {path}")
+              list_directory(pathlib.Path(path))
+
+            # Remove
+            for path in spec.submodule_search_locations:
+              print(f"Removing {path}...")
+              shutil.rmtree(path)
+
+          for package in PACKAGES:
+            fix_package(package)
 
       - name: Start display server
         if: startsWith(matrix.os, 'ubuntu')
@@ -282,7 +296,7 @@ jobs:
 
       - name: Create artifact out of archived failed tests
         if: ${{ failure() && steps.run-tests.outcome == 'failure' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: failed-tests-${{ matrix.os }}-python-${{ matrix.python-version }}
           path: '${{ env.PYTEST_DEBUG_TEMPROOT }}/archived-failed-tests.tar'
@@ -314,18 +328,43 @@ jobs:
 
       - name: Run hooksample tests
         run: |
-          # The ``run_tests`` script is invoked with the ``-c`` option to
-          # specify a ``pytest.ini``, rather than allowing pytest to find
-          # something unexpected in the filesystem (it searches from the root
-          # dir all the way to the top of the filesystem per
-          # https://docs.pytest.org/en/latest/customize.html).
-          python -m PyInstaller.utils.run_tests -c PyInstaller/utils/pytest.ini --include_only=pyi_hooksample.
+          # The ``run_tests`` script is invoked somewhere outside of the pyinstaller git clone to prevent pytest from
+          # loading PyInstaller's pytest.ini.
+          cd ~
+          python -m PyInstaller.utils.run_tests --include_only=pyi_hooksample.
+
+  test-freethreaded:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: ['3.13t', '3.14t', '3.15t-dev']
+        os: ['windows-latest', 'ubuntu-24.04', 'macos-15-intel', 'macos-14']
+      fail-fast: false
+    steps:
+      - name: Checkout PyInstaller code
+        uses: actions/checkout@v6
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          check-latest: true
+
+      - name: Update pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install PyInstaller
+        run: python -m pip install . --requirement tests/requirements-base.txt
+
+      - name: Run tests
+        id: run-tests
+        run: pytest tests/functional/test_freethreading.py
 
   test-alpine:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PyInstaller code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Build container
         run: docker build -f alpine.dockerfile -t foo .
@@ -340,7 +379,7 @@ jobs:
       # Verify that installing from sdist works. This is mostly just a verification that the MANIFEST.in contains
       # all the extras needed to compile the bootloader.
       - name: Setup Python for creating sdist
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: 3.x
 
@@ -411,7 +450,7 @@ jobs:
           mingw-w64-${{matrix.env}}-python-pillow
 
       - name: Checkout PyInstaller code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Show system and python information
         run: |
@@ -466,12 +505,11 @@ jobs:
             python39-pip
             python39-tkinter
 
-
       - name: Disable CRLF line endings in git checkout
         run: git config --global core.autocrlf input
 
       - name: Checkout PyInstaller code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Show system and python information
         run: |
@@ -499,6 +537,17 @@ jobs:
           Xvfb :99 &
           echo "DISPLAY=:99" >> $GITHUB_ENV
 
+      # See the equivalent step in the "tests" job.
+      # This is a simplified version that targets pnly issue with `pkg_resources`,
+      # which arose with update to `setuptools` 82.0.0. It can be removed once
+      # the cygwin python environment comes with `setuptools` 82.0.0 or newer
+      # installed by default.
+      # NOTE: we cannot use "python" shell here, because that resolves to
+      # python in C:\hostedtoolcache\windows\Python instead of cygwin one!
+      - name: Work around potentially broken setuptools upgrade
+        run: |
+          python -c 'import importlib.util; import shutil; spec = importlib.util.find_spec("pkg_resources"); spec and spec.loader is None and shutil.rmtree(spec.submodule_search_locations[0])'
+
       - name: Run tests
         # Keep the number of pytest workers below the number of available
         # CPU cores to avoid CPU contention scenarios, which seem to trigger
@@ -512,13 +561,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout PyInstaller code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
+      # Explicitly set CC=clang, to prevent `pip` from trying to build `psutil` extensions with `x86_64-linux-android-clang`,
+      # which (in contrast to `clang` and `gcc`) does not seem to set `__ANDROID_API__` and `__ANDROID_MIN_SDK_VERSION__`;
+      # consequently, `/usr/include/ifaddrs.h` header does not provide `getifaddrs()` and `freeifaddrs()`, leading to build error.
       - name: Run tests in container
         run: |
           docker run -v"$PWD:/io" termux/termux-docker:x86_64 bash -ec '
             echo "*** Installing system dependencies ***"
+            ln -sf ${PREFIX}/etc/termux/mirrors/default ${PREFIX}/etc/termux/chosen_mirrors
+            pkg update
+            pkg upgrade -y
             pkg install -y python ldd binutils
+            export CC=clang
             echo "*** Installing PyInstaller ***"
             cp -fr /io $HOME/PyInstaller
             cd $HOME/PyInstaller
@@ -527,6 +583,7 @@ jobs:
             cd ..
             python -m pip install .
             echo "*** Installing test requirements ***"
+            pkg install -y python-psutil
             python -m pip install -r tests/requirements-base.txt
             echo "*** Running tests ***"
             export FORCE_COLOR=1

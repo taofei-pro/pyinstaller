@@ -207,7 +207,7 @@ Splash Screen *(Experimental)*
     the Tcl/Tk (or rather, the underlying GUI toolkit) on macOS.
 
 Some applications may require a splash screen as soon as the application
-(bootloader) has been started, because especially in onefile mode large
+(bootloader) has been started, because especially in ``onefile`` mode large
 applications may have long extraction/startup times, while the bootloader
 prepares everything, where the user cannot judge whether the application
 was started successfully or not.
@@ -221,6 +221,24 @@ image, so non-rectangular splash screens can also be displayed.
     Splash images with transparent regions are not supported on Linux due to
     Tcl/Tk platform limitations. The ``-transparentcolor`` and ``-transparent`` wm attributes
     used by PyInstaller are not available to Linux.
+
+.. Note::
+    On Windows, the transparency in splash screen is implemented by marking the
+    ``magenta`` color (``#ff00ff``) as transparent color, and overlaying the
+    splash screen image over magenta background. This has two implications.
+
+    First, any region of splash screen image that uses magenta color will be rendered as
+    transparent; if splash screen originally contains magenta regions, they should
+    be changed to a slightly different color instead (for example, ``#ff00fe``).
+
+    Second, **semi-transparent pixels in the splash screen image are not supported, and
+    will be rendered as a shade of magenta color that depends on transparency of
+    each pixel**, due to image being overlaid on magenta background. For example, if
+    splash screen image contains **feathered edges** (i.e., smooth edges made up of
+    semi-transparent pixels), these will end up manifesting as magenta-colored glow around
+    the opaque part of the splash screen - see :issue:`8579`. To mitigate this problem,
+    use an image processing utility to convert your image into a hard-cut transparent
+    image, where every pixel is either fully transparent or fully opaque.
 
 This splash screen is based on `Tcl/Tk`_, which is the same library used by the Python
 module `tkinter`_. PyInstaller bundles the dynamic libraries of tcl and tk into the
@@ -242,9 +260,53 @@ system, as it is not bundled. If the font is not available, a fallback font is u
 If the splash screen is configured to show text, it will automatically (as onefile archive)
 display the name of the file that is currently being unpacked, this acts as a progress bar.
 
+.. Warning::
+    While splash screen can be enabled in either ``onefile`` or ``onedir`` mode,
+    using it in ``onedir`` mode may cause issues with your application's own UI -
+    see :ref:`splash screen onedir issues`.
+
+
+.. _splash screen centering:
+
+Splash screen centering
+-----------------------
+
+By default, the splash screen script attempts to center the splash screen based on screen
+dimensions obtained by the Tk's ``winfo`` command (i.e., ``winfo screenwidth`` and
+``winfo screenheight``). In the case of multi-monitor setups, this may result in a platform-specific
+behavior; on Windows, the size of the primary screen seems to be reported, while on other platforms,
+the size of the whole virtual screen seems to be reported.
+
+Therefore, the splash screen implementation provides additional centering modes, where the target
+screen dimensions are obtained by bootloader using low-level platform-specific API, and passed to
+the splash screen script for centering purposes. The preferred splash screen centering mode can
+be set at build-time via the ``center`` argument passed to :ref:`the Splash target in the spec file
+<splash screen target>`, or via the :option:`--splash-center` command-line option when generating
+the spec file. The centering mode can be overridden at run-time using the :envvar:`PYINSTALLER_SPLASH_SCREEN_CENTER`
+environment variable.
+
+The following modes can be set at either build-time and the run-time:
+
+- **default**: have the splash screen script use Tk's ``winfo`` to obtain platform-specific screen
+  dimensions. No additional information is required from the bootloader.
+
+- **primary**: have the bootloader use low-level API to obtain dimensions of the primary screen,
+  so that splash screen is centered on the primary monitor.
+
+- **virtual**: have the bootloader use low-level API to obtain dimensions of the whole virtual
+  screen, so that splash screen is centered on the virtual screen.
+
+- **active**: have the bootloader use low-level API to obtain mouse cursor position, and obtain the
+  dimensions of corresponding screen. This way, the splash screen is centered on "active" monitor,
+  i.e., the one where the mouse cursor is located at the time when application is started. This mode
+  is currently supported only on Windows - on other platforms, **primary** mode is used instead.
+
+If the bootloader cannot obtain the required information, the splash screen script falls back to
+using the information obtained via the ``winfo`` command.
+
 
 The ``pyi_splash`` Module
-~~~~~~~~~~~~~~~~~~~~~~~~~
+-------------------------
 
 The splash screen is controlled from within Python by the :mod:`pyi_splash` module, which can
 be imported at runtime. This module **cannot** be installed by a package manager
@@ -265,6 +327,42 @@ This module must be imported within the Python program. The usage is as follows:
 Of course the import should be in a ``try ... except`` block, in case the program is
 used externally as a normal Python script, without a bootloader.
 For a detailed description see :ref:`pyi_splash Module`.
+
+
+.. _splash screen onedir issues:
+
+Issues caused by splash screen in ``onedir`` applications
+---------------------------------------------------------
+
+Splash screen was primarily designed for ``onefile`` mode, to indicate
+the application activity and progress during extraction to the temporary
+directory. In this mode, the splash screen and your application's own UI
+(if any) run in different processes; the splash screen runs in the parent
+process of the onefile application, while the application's UI runs in
+the child process of the onefile application (which is the main application
+process).
+
+While splash screen can be also used with ``onedir`` applications, be aware
+that in this mode, both the splash screen and the application's own UI run
+in the same process. This might have implications for the application's own
+windows, which are instantiated and shown after the splash screen's window,
+and might manifest in subtle issues, independently of whether your application
+also uses ``tkinter`` or some other UI framework.
+
+So far, the following issues have been observed:
+
+- :issue:`8338` (Windows): using splash screen in ``onedir`` application causes
+  focus issues in windows and dialogs shown by the application; closing the splash
+  screen might send other application windows to the background.
+- :issue:`9394` (Windows): using splash screen in ``onedir`` application that
+  uses ``tkinter`` prevents the default/application-wide window icon from
+  being set via ``Tk.iconphoto()``.
+
+These issues likely stem from the fact that splash screen is the first
+displayed window in the process, and therefore the OS ends up treating it
+as the "main" application window. A proper fix would likely require the
+redesign of splash screen to run in a separate process rather than in
+a secondary thread of the main process.
 
 
 .. _defining the extraction location:

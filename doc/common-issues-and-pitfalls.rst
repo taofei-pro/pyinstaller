@@ -508,3 +508,56 @@ by setting dummy file handles at the very start of your program::
     mode, we recommend that you first try running your unfrozen script
     using the ``pythonw.exe`` interpreter to ensure that it works correctly
     when console is unavailable.
+
+
+Icon seemingly not being updated on rebuilt Windows executables
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On Windows, the OS keeps an icon cache that seems to be based on the
+executable's full path, and does not update when an executable at
+an already-cached location is modified (for example, is replaced by a
+different executable with the same name).
+
+Therefore, if you try to rebuild your application with a different icon,
+it might seem that the icon on the executable has not changed. However,
+if you rename the executable or copy/move it to a different location,
+the icon will be updated accordingly.
+
+There are different ways of forcing the icon cache update; since you
+have a python interpreter at your disposal, perhaps the most robust
+way (aside from restarting the system) is to open an interactive
+python shell, and call `SHChangeNotify <https://learn.microsoft.com/en-us/windows/win32/api/shlobj_core/nf-shlobj_core-shchangenotify>`_
+win32 API function via :mod:`ctypes`, passing ``SHCNE_ASSOCCHANGED``
+(0x08000000) and ``SHCNF_IDLIST`` (0x0000) as its first two arguments::
+
+    import ctypes
+    shell32 = ctypes.OleDLL('shell32')
+    shell32.SHChangeNotify.restype = None
+    shell32.SHChangeNotify(0x08000000, 0x0000, None, None)
+
+
+.. _control flow guard:
+
+Windows executables and Control Flow Guard (CFG)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When PyInstaller's bootloader is compiled on Windows with Microsoft Visual
+C (MSVC) toolchain, the `Control Flow Guard (CFG) <https://learn.microsoft.com/en-us/windows/win32/secbp/control-flow-guard>`_
+feature is enabled by default. Therefore, the pre-compiled bootloader
+executables for Windows that are shipped with PyInstaller also have CFG
+enabled, and so do the Windows executables made with said bootloader
+executables.
+
+Control Flow Guard may interfere with libraries that need to manipulate
+control flow for whatever reason (for example, the `unicorn package from Unicorn project <https://www.unicorn-engine.org>`_),
+and cause the application to crash.
+
+In order to build an application using such library, you need to rebuild
+the bootloader with Control Flow Guard explicitly disabled. To do so,
+pass the ``--no-cfg`` option to the bootloader build script, either on
+the command-line (if building manually from unpacked source archive or
+repository checkout) or via the ``PYINSTALLER_BOOTLOADER_WAF_ARGS``
+environment variable (if using ``pip install`` in combination with
+``PYINSTALLER_COMPILE_BOOTLOADER`` environment variable).
+
+For details, see :ref:`building the bootloader`.

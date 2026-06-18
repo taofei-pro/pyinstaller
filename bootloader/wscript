@@ -59,6 +59,10 @@ DESTOS_TO_SYSTEM = {
 # Map from platform.system() to waf's DEST_OS
 SYSTEM_TO_BUILDOS = {
     'Linux': 'linux',
+    # In Termux environment, `platform.system()` reports 'Android' under python >= 3.13 (PEP-738), and 'Linux' under
+    # older python versions. Compiler-based identification currently always resolves to 'linux', so we need to ensure
+    # Android is also folded back into 'linux', to avoid a message about "cross-compiling for Linux".
+    'Android': 'linux',
     'FreeBSD': 'freebsd',
     'Windows': 'win32',
     'Darwin': 'darwin',
@@ -78,13 +82,6 @@ else:
     BUILD_OS = SYSTEM_TO_BUILDOS.get(platform.system(), platform.system())
 
 is_cross = None
-
-
-def machine(ctx):
-    """
-    Determine path to bootloader based on C compiler target.
-    """
-    return _shared_with_waf._pyi_machine(ctx.env.DEST_CPU, DESTOS_TO_SYSTEM[ctx.env.DEST_OS])
 
 
 def is_msvc_target(ctx):
@@ -183,6 +180,16 @@ def options(ctx):
         dest='macos_universal2',
     )
 
+    grp = ctx.add_option_group('Windows-specific options', 'These options have effect only on Windows.')
+    grp.add_option(
+        '--no-cfg',
+        action='store_false',
+        help="When building on Windows with MSVC, do not enable Control Flow Guard (CFG). By default, bootloader "
+        "executables are built with CFG enabled, which might cause issues with certain libraries.",
+        default=True,
+        dest='enable_cfg',
+    )
+
 
 def check_sizeof_pointer(ctx):
     def check(type, expected):
@@ -213,7 +220,7 @@ def check_sizeof_pointer(ctx):
 @conf
 def detect_arch(ctx):
     """
-    Handle --target-arch options, or use the same architecture as the compiler.
+    Handle --target-arch options, or use the compiler's default architecture.
     """
     try:
         system = DESTOS_TO_SYSTEM[ctx.env.DEST_OS]
@@ -223,7 +230,6 @@ def detect_arch(ctx):
     # Get arch values either from CLI or detect it.
     if ctx.options.target_arch:
         arch = ctx.options.target_arch
-        ctx.msg('Platform', '%s-%s manually chosen' % (system, arch))
         ctx.env.ARCH_FLAGS_REQUIRED = True
         if arch == '64bit-arm':
             arch = '64bit'
@@ -232,19 +238,36 @@ def detect_arch(ctx):
         # PyInstaller uses the result of platform.architecture() to determine the bits and this is testing the pointer
         # size (via module struct). We do the same here.
         arch = "%sbit" % (8 * check_sizeof_pointer(ctx))
-        _machine = machine(ctx)
-        if _machine is not None:
-            plat = '%s-%s-%s detected based on compiler' % (system, arch, _machine)
-        else:
-            plat = '%s-%s detected based on compiler' % (system, arch)
-        ctx.msg('Platform', plat)
         ctx.env.ARCH_FLAGS_REQUIRED = False
     if arch not in ('32bit', '64bit'):
         ctx.fatal('Unrecognized target architecture: %s' % arch)
 
-    # Pass return values as environment variables.
-    ctx.env.PYI_ARCH = arch  # '32bit' or '64bit'
+    # Normalize target CPU architecture into identifiers that PyInstaller uses at run-time to look up bootloader
+    # executable. The value in `ctx.env.DEST_CPU` is waf's identifier, based on macro definitions set up by the
+    # compiler. It is empty when identification fails. See `MACRO_TO_DEST_CPU` in `waflib/Tools/c_config.py`.
+    machine = ctx.env.DEST_CPU
+    if not machine:
+        # waf failed to identify target CPU - assume platform that we are building on. This implicitly breaks
+        # cross-compiling for unidentified platforms, as compiled bootloaders will end up being placed in incorrect
+        # directory.
+        machine = platform.machine()
+        ctx.msg("Failed to identify target CPU - assuming", machine)
+    machine = _shared_with_waf._pyi_machine(machine, system)
+
+    # Display full platform info
+    full_platform = f'{system}-{arch}-{machine}' if machine is not None else f'{system}-{arch}'
+    if ctx.options.target_arch:
+        ctx.msg('Platform', f'{full_platform} manually chosen')
+    else:
+        ctx.msg('Platform', f'{full_platform} detected based on compiler')
+
+    # Pass return values as environment variables:
+    #  - PYI_SYSTEM: normalized name of target OS
+    #  - PYI_MACHINE: normalized name of target CPU architecture
+    #  - PYI_ARCH: '32bit' or '64bit'
     ctx.env.PYI_SYSTEM = system
+    ctx.env.PYI_MACHINE = machine
+    ctx.env.PYI_ARCH = arch
 
 
 @conf
@@ -262,7 +285,7 @@ def set_arch_flags(ctx):
 
     if ctx.env.DEST_OS == 'win32' and ctx.env.CC_NAME == 'msvc':
         # Set msvc linkflags based on architecture.
-        if machine(ctx) == 'arm':
+        if ctx.env.PYI_MACHINE == 'arm':
             ctx.env.append_value('LINKFLAGS', '/MACHINE:ARM64')
         elif ctx.env.PYI_ARCH == '32bit':
             ctx.env.append_value('LINKFLAGS', '/MACHINE:X86')
@@ -339,7 +362,7 @@ def set_arch_flags(ctx):
 
     # Other compiler - not msvc.
     else:
-        if machine(ctx) == 'sw_64':
+        if ctx.env.PYI_MACHINE == 'sunway':
             # The gcc has no '-m64' option under sw64 machine, but the __x86_64__ macro needs to be defined.
             ctx.env.append_value('CCDEFINES', '__x86_64__')
         # This ensures proper compilation with 64-bit gcc and 32-bit Python or vice versa or with manually
@@ -508,11 +531,18 @@ def configure(ctx):
         # For clang, also enable extra warnings and treat them as errors. Similarly to gcc, do not treat warnings about
         # unused variables and unused functions as errors.
         ctx.env.append_value(
-            'CFLAGS', [
+            'CFLAGS',
+            [
                 '-Wall',
                 '-Werror',
                 '-Wno-error=unused-variable',
                 '-Wno-error=unused-function',
+                # Passing `clang -fPIE -pie` via `CC` environment variable to create position-independent bootloader
+                # executables causes `clang` to emit following warnings when compiling object files due to `-pie`
+                # being linker-stage flag:
+                #   clang: warning: argument unused during compilation: '-pie' [-Wunused-command-line-argument]
+                # Make them non-fatal.
+                '-Wno-error=unused-command-line-argument',
             ]
         )
 
@@ -548,6 +578,11 @@ def configure(ctx):
         # On macOS, mkdtemp() is available only with _DARWIN_C_SOURCE.
         elif ctx.env.DEST_OS == 'darwin':
             ctx.env.append_value('DEFINES', '_DARWIN_C_SOURCE')
+        # On AIX, -pthread flag sets _THREAD_SAFE=1 instead of _REENTRANT. Having _THREAD_SAFE (or _THREAD_SAFE_ERRNO)
+        # defined enables thread-safe errno. _THREAD_SAFE is automatically defined when <pthread.h> is included, but
+        # we would need to ensure it is included at the top of every compilation unit. It is easier to define it here.
+        elif ctx.env.DEST_OS == 'aix':
+            ctx.env.append_value('DEFINES', '_THREAD_SAFE=1')
 
         # Determine which semaphore API to use for syncing onefile parent and child process on non-Windows platforms;
         # this is required to ensure consistent signal forwarding behavior. We prefer to use POSIX semaphores; however,
@@ -589,6 +624,9 @@ def configure(ctx):
 
     elif ctx.env.DEST_OS == 'aix':
         ctx.env.append_value('DEFINES', 'AIX')
+        # Additional macro to distinguish between 32-bit and 64-bit AIX builds.
+        if ctx.env.PYI_ARCH == '64bit':
+            ctx.env.append_value('DEFINES', 'AIX64')
         # On AIX some APIs are restricted if _ALL_SOURCE is not defined. In the case of PyInstaller, we need the AIX
         # specific flag RTLD_MEMBER for dlopen(), which is used to load a shared object from a library archive.
         # We need to load the Python library like this:
@@ -686,6 +724,7 @@ def configure(ctx):
         ('unistd.h' if ctx.env.DEST_OS == 'darwin' else 'stdlib.h', 'mkdtemp'),
         ('libgen.h', 'dirname'),
         ('libgen.h', 'basename'),
+        ('wchar.h', 'wcsdup')
     ):
         ctx.check(
             fragment=SNIP_FUNCTION % (header, function_name),
@@ -706,10 +745,12 @@ def configure(ctx):
             # 6.00 (x86, x64) and 6.02 (ARM) should be fine for our purposes.
             ctx.env.append_value('LINKFLAGS', '/SUBSYSTEM:CONSOLE')
 
-            # Enable support for Control Flow Guard
+            # Enable support for Control Flow Guard (CFG)
             # https://docs.microsoft.com/en-us/windows/win32/secbp/control-flow-guard
-            ctx.env.append_value('CFLAGS', '/guard:cf')
-            ctx.env.append_value('LINKFLAGS', '/guard:cf')
+            ctx.msg('Enable Control Flow Guard (CFG)', result='yes' if ctx.options.enable_cfg else 'no')
+            if ctx.options.enable_cfg:
+                ctx.env.append_value('CFLAGS', '/guard:cf')
+                ctx.env.append_value('LINKFLAGS', '/guard:cf')
 
             # Increase the executable's stack size from the default 1 MiB (0x100000) to 2 MB (0x1E8480) to match
             # the stack size under the Python interpreter.
@@ -824,8 +865,8 @@ def build(ctx):
     install_path = os.path.join(os.getcwd(), '../PyInstaller/bootloader', ctx.env.PYI_SYSTEM + "-" + ctx.env.PYI_ARCH)
     install_path = os.path.normpath(install_path)
 
-    if machine(ctx) and ctx.env.DEST_OS != 'darwin':
-        install_path += '-' + machine(ctx)
+    if ctx.env.PYI_MACHINE and ctx.env.DEST_OS != 'darwin':
+        install_path += '-' + ctx.env.PYI_MACHINE
 
     if ctx.is_musl():
         install_path += "-musl"
@@ -880,7 +921,7 @@ def build(ctx):
 
     # This warning is deliberately at the end of the build, in the hopes that it will be more visible amongst all the
     # other stuff written to stdout.
-    if machine(ctx) and machine(ctx) == "unknown":
+    if ctx.env.PYI_MACHINE and ctx.env.PYI_MACHINE == "unknown":
         Logs.log.warning(
             "The target architecture reported by the compiler '%s' was not recognised and defaulted to 'unknown'. You "
             "should verify that `PyInstaller.compat.machine` is also 'unknown' on the target machine. If it is not, "

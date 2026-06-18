@@ -5,6 +5,64 @@ Thanks goes to all the kind PyInstaller contributors who have contributed
 new code, bug reports, fixes, comments and ideas. A brief list follows,
 please let us know if your name is omitted by accident:
 
+Contributions to PyInstaller 6.21.0
+-----------------------------------
+
+* Rok Mandeljc
+* Arjan Molenaar
+* Brénainn Woodsend
+
+Contributions to PyInstaller 6.20.0
+-----------------------------------
+
+* Rok Mandeljc
+* Eric Werner
+* mcoms
+
+Contributions to PyInstaller 6.19.0
+-----------------------------------
+
+* Rok Mandeljc
+* Alain Kadar
+* Suren Karapetyan
+
+Contributions to PyInstaller 6.18.0
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* markmenge
+
+Contributions to PyInstaller 6.17.0
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Chris Bradel
+* Jacob Rogers
+* Marc-Pierre-Barbier
+* Nils Nieuwejaar
+* Thomas Waldmann
+
+Contributions to PyInstaller 6.16.0
+-----------------------------------
+
+* Rok Mandeljc
+* Brénainn Woodsend
+* Ross Demuth
+
+Contributions to PyInstaller 6.15.0
+-----------------------------------
+
+* Rok Mandeljc
+
+Contributions to PyInstaller 6.14.2
+-----------------------------------
+
+* Rok Mandeljc
+* Jordan Stopford
+* sorenstoutner
+
 Contributions to PyInstaller 6.14.1
 -----------------------------------
 

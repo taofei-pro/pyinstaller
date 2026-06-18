@@ -15,6 +15,306 @@ Changelog for PyInstaller
 
 .. towncrier release notes start
 
+6.16.0 (2026-06-13)
+-------------------
+
+Features
+~~~~~~~~
+
+* Add support for Python 3.15. (:issue:`9456`)
+* Initial support for setting :ref:`alternative splash screen centering modes
+  <splash screen centering>` for multi-monitor setups. (:issue:`6271`)
+
+
+Hooks
+~~~~~
+
+* Prevent ``_ios_support`` and ``libobjc.so`` from being collected on non-IOS
+  platforms if :mod:`webbrowser` is imported. (:issue:`9436`)
+* Update ``scipy`` hook for compatibility with upcoming ``scipy`` v1.18.0.
+  (:issue:`9450`)
+* Update the ``gi.repository.Adw`` hook to collect translation files
+  for ``libadwaita``. (:issue:`9444`)
+
+
+Documentation
+~~~~~~~~~~~~~
+
+* Document known issues with using splash screen in ``onedir`` GUI-based
+  applications. (:issue:`9425`)
+* Document the "glowing magenta border" problem in splash screen when
+  splash screen image contains semi-transparent pixels (for example,
+  due to feathered edges). (:issue:`9425`)
+
+
+6.20.0 (2026-04-22)
+-------------------
+
+Bugfix
+~~~~~~
+
+* (Linux) Fix binary dependency analysis in Termux environment; previously,
+  no binary dependencies would be reported due to mismatched ``ldd`` output
+  pattern. (:issue:`9402`)
+* (Linux) Fix compatibility issues with Termux python 3.13, caused by
+  platform being now reported as "android" instead of "linux" (PEP 738).
+  (:issue:`9398`)
+* (macOS) Fix built-time error when trying to create an .app bundle with
+  data collected from a directory that contains symlinked elements.
+  (:issue:`9375`)
+* Fix the ``forkserver`` spawn mode of ``multiprocessing`` under python
+  3.13.13, 3.14.4, and the upcoming 3.15. (:issue:`9423`)
+* Remove warning about non-existing ``tclX`` module directory; in some Tcl
+  distributions (e.g., Debian-packaged Tcl), this directory is located
+  under the main library/data directory, and therefore the stand-alone
+  directory neither exists nor needs to be explicitly collected.
+  (:issue:`9401`)
+
+
+Hooks
+~~~~~
+
+* Prevent the run-time hook for ``gi.repository.GLib`` from overriding
+  the implicit default value of the ``XDG_DATA_DIRS`` environment
+  variable (i.e., ``/usr/local/share/:/usr/share/``) when adding the
+  frozen application's top-level directory to the list of data directories.
+  (:issue:`9422`)
+* Update ``gi.repository.Gio`` hook to collect corresponding platform-specific
+  typelib (``GioWin32`` or ``GioUnix``), and add hooks for these modules.
+  This aims to prevent potential run-time errors, either because the typelib
+  is missing, or because it was opportunistically loaded from the run-time
+  system and happens to be of incompatible version. (:issue:`9410`)
+* Update ``gi.repository.GLib`` hook to collect corresponding platform-specific
+  typelib (``GLibWin32`` or ``GLibUnix``), and add hooks for these modules.
+  This aims to prevent potential run-time errors, either because the typelib
+  is missing, or because it was opportunistically loaded from the run-time
+  system and happens to be of incompatible version. (:issue:`9410`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* (Windows) Add new option to the ``waf`` build script, ``--no-cfg``,
+  that allows bootloader to be built without Control Flow Guard (CFG)
+  enabled. Applicable only when building with MSVC toolchain. (:issue:`9352`)
+* Fix errors when compiling with ``glibc`` 2.43 and compiler that defaults
+  to using C23 standard. (:issue:`9371`)
+* Rework the handling of unknown target CPU architectures in the bootloader
+  build script, and add identification for ``loongsoon`` and ``sunway`` to
+  the bundled copy of ``waflib``. The bootloader directories for these
+  platforms now use PyInstaller's normalized platform name (i.e.,
+  ``Linux-64bit-loongarch`` and ``Linux-64bit-sunway`` instead of
+  former ``Linux-64bit-loongarch64`` and ``Linux-64bit-sw_64``). (:issue:`9403`)
+* Update the bundled zlib sources to v1.3.2. (:issue:`9384`)
+
+
+6.19.0 (2026-02-14)
+-------------------
+
+Bugfix
+~~~~~~
+
+* (Windows) Fix collection of ``numpy`` DLLs when ``numpy`` PyPI wheel is
+  installed using ``uv`` instead of ``pip``. (:issue:`9360`)
+* Extend suppression of missing ``api-ms-win-*.dll`` warnings to Windows Server
+  (formerly Windows 10 and 11). (:issue:`9355`)
+* (Conda) Fix error during initialization of the `conda` hook utility module in
+  Anaconda environments where the metadata for packages with no dependencies
+  omit their *dependencies* key. (:issue:`9345`)
+
+
+Hooks
+~~~~~
+
+* (Windows) Fix installer check in ``numpy`` hook to enable explicit collection
+  of DLLs from ``numpy.libs`` directory when ``numpy`` PyPI wheels are installed
+  through an installer other than ``pip`` - for example, ``uv``. (:issue:`9365`)
+* (Windows) Update the ``pandas`` hook to explicitly collect the DLLs
+  from ``pandas.libs`` directory that has been used in Windows PyPI wheels
+  since ``pandas`` 2.1.0. (:issue:`9365`)
+
+
+6.18.0 (2026-01-13)
+-------------------
+
+Features
+~~~~~~~~
+
+* Implement support for Tcl/Tk 9 in splash screen. (:issue:`9313`)
+
+
+Bugfix
+~~~~~~
+
+* (macOS) Improve the .framework bundle fix-up code to remove file entries
+  that would be placed under restored symlinked directories. This fixes
+  file-already-exists errors at build time (onedir) or run-time (onefile)
+  when user or a hook tries to collect (all) files from a package that
+  ships a .framework bundle with symlinks mangled into hard-copies
+  (for example, due to lack of symlink support in PyPI wheels). (:issue:`9335`)
+* Have hook for stdlib ``platform`` module exclude the ``_ios_support``
+  module when ``sys.platform != 'ios'``. This prevents unnecessary
+  collection of ``ctypes``-imported ``libobjc`` shared library if the
+  latter happens to be available on the build system. (:issue:`9333`)
+
+
+Hooks
+~~~~~
+
+* Update ``scipy`` hook for compatibility with ``scipy`` 1.17.0.
+  (:issue:`9353`)
+
+
+Bootloader
+~~~~~~~~~~
+
+* (Windows) When spawning ``onefile`` child process, preserve the values of
+  ``dwFlags`` and ``wShowWindow`` in ``STARTUPINFO`` structure as inherited
+  from the parent process, instead of forcing them to ``STARTF_USESHOWWINDOW``
+  and ``SW_NORMAL``. (:issue:`9342`)
+
+
+6.17.0 (2025-11-24)
+-------------------
+
+Bugfix
+~~~~~~
+
+* Avoid indirect usage of ``pkg_resources`` which is deprecated and scheduled to
+  be removed in 2025-11-30. (:issue:`9149`)
+* Revise the search for Python shared library from :issue:`9218` and
+  the restrictions it imposes: enable the fall-back codepath with
+  guess-based name for all Python builds that report ``Py_ENABLE_SHARED=0``
+  instead of just for Anaconda Python (``compat.is_conda``), but limit
+  the search paths in this fall-back codepath to only ``sys.base_prefix``
+  and the ``lib`` directory under it. (:issue:`9276`)
+* Work around performance issues introduced by superfluous usage of
+  :func:`gc.collect` in ``pefile==2024.8.26``. PyInstaller no longer blocks
+  :installing ``pefile==2024.8.26``. (:issue:`8762`)
+
+
+Hooks
+~~~~~
+
+* Fix finding setuptools's vendored copies of ``backports`` and ``jaraco``
+  packages. (:issue:`9250`)
+
+
+6.16.0 (2025-09-13)
+-------------------
+
+Features
+~~~~~~~~
+
+* (POSIX) Adjust the destination directory for collected python's standard
+  extensions, from ``lib-dynload`` to ``python3.x/lib-dynload`` directory,
+  in order to preserve the relative relationship between the extension
+  location and the (grand-parent) shared library directory that is commonly
+  found in POSIX python environments. This is required for compatibility
+  with upcoming Linux builds of ``astral-sh/python-build-standalone#`` that
+  will set relative library paths in extensions via both ``DT_NEEDED`` and
+  ``DT_RPATH``. (:issue:`9212`)
+* Rework the anonymization of the ``co_filename`` attribute in collected
+  code objects - instead of trying to obtain anonymized relative name by
+  removing known path prefixes from the original absolute-path ``co_filename``,
+  we now construct the anonymized relative name directly from the collected
+  module's (or script's) destination name w.r.t. its destination container
+  (i.e., the ``PKG`` archive, the ``PYZ`` archive, or the ``base_library.zip``
+  archive). (:issue:`9226`)
+* Rework the search for python shared library in order to reduce amount of
+  guess-work and better accommodate variations in naming across platforms
+  and due to different build options (e.g., debug build with "d" suffix,
+  free-thread build with "t" suffix, combination of both).
+
+  On Windows, the loaded python DLL is now resolved by calling
+  ``GetModuleFileName``
+  on the handle exposed by :data:`sys.dllhandle`; this applies to python.org
+  Windows
+  builds, Anaconda python on Windows, and MSYS2 python.
+
+  On other platforms, first explicitly verify that shared library is enabled,
+  by checking the value of ``Py_ENABLE_SHARED`` variable exposed by the
+  ``sysconfig`` module. On macOS, also check if .framework bundle is
+  enabled instead, which is implied by a non-empty ``PYTHONFRAMEWORK``
+  variable in ``sysconfig``. If shared library is enabled, use ``INSTSONAME``
+  variable exposed by ``sysconfig`` module as the only source of truth
+  w.r.t. its name. This works even with Debian-packaged python and
+  ``astral-sh/python-build-standalone`` POSIX builds; while they have
+  their ``python`` executable statically linked against python shared
+  library, they seem to properly set these variables.
+
+  In contrast, both Linux and macOS builds of Anaconda python seem to
+  build their interpreter executable and python shared library separately,
+  so the interpreter reports ``Py_ENABLE_SHARED`` variable to be set to ``0``
+  (and ``INSTSONAME`` gives name of the static library). Therefore, for
+  Anaconda python on non-Windows, use the old approach of guessing the
+  library name from the major and minor version and whether free-threading
+  is enabled or not (i.e., the presence of the "t" suffix).
+
+  Adjust the error messages; display the part about rebuilding python with
+  ``--enable-shared`` option only if we detect lack of support for shared
+  library. Similarly, display the part about Debian package only if we
+  are running under Debian or its derivative; and advise to install
+  ``libpython3.X`` package rather than ``python3-dev``. (:issue:`9218`)
+
+
+Hooks
+~~~~~
+
+* Add hook for ``gi.repository.OsmGpsMap``. (:issue:`9209`)
+
+
+6.15.0 (2025-08-03)
+-------------------
+
+Features
+~~~~~~~~
+
+* Add Python 3.14 support. (:issue:`9192`)
+
+
+Bugfix
+~~~~~~
+
+* (non-Windows) Ensure that binary dependency analysis creates symbolic
+  links in top-level application directory for shared libraries that are
+  not resolvable during binary dependency analysis but are nevertheless
+  collected due to being explicitly collected by a hook or by the user.
+  (:issue:`9186`)
+* Attempt to mitigate the issue with module exclusion when a top-level
+  package hook excludes its own subpackage to prevent its collection
+  in the absence of any external references; such exclusion rule would
+  prevent collection of modules from such subpackage even when it is
+  supposed to be collected due to an external reference (for example, an
+  explicit import from the user's program). (:issue:`9193`)
+* Fix a bug in module exclusion part of analysis codepath that would cause
+  certain types of relative imports to be misinterpreted and thus fail to
+  exclude them. (:issue:`9197`)
+
+
+6.14.2 (2025-07-04)
+-------------------
+
+Bugfix
+~~~~~~
+    
+* Exclude ``libsocket.so`` on Solaris as this is specific to the Solaris
+  installation and causes symbol errors otherwise. (:issue:`9171`)
+
+
+Hooks
+~~~~~
+
+* Update ``scipy`` hooks for compatibility with ``scipy`` 1.6.0.
+  (:issue:`9180`)
+
+
+Bootloader build
+~~~~~~~~~~~~~~~~
+
+* Fix compiling bootloader on Solaris 10 systems. (:issue:`9171`)
+
+
 6.14.1 (2025-06-08)
 -------------------
 

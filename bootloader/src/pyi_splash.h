@@ -19,18 +19,36 @@
 #include "pyi_archive.h"
 #include "pyi_dylib_tcltk.h"
 
+/* Splash screen centering modes */
+enum SPLASH_CENTER_MODE
+{
+    /* No additional bootloader processing; have the splash screen script
+     * fall back to the  `winfo screenwidth` and `winfo screenheight` */
+    SPLASH_CENTER_DEFAULT = 0,
+    /* Center on virtual screen */
+    SPLASH_CENTER_VIRTUAL_SCREEN = 1,
+    /* Center on primary monitor / screen */
+    SPLASH_CENTER_PRIMARY_SCREEN = 2,
+    /* Center on active monitor / screen; i.e., where mouse cursor is at
+     * the time when application is launched. */
+    SPLASH_CENTER_ACTIVE_SCREEN = 3
+};
+
 /* Archive item header for splash data
  * This struct is a header describing the rest of this archive item */
 struct SPLASH_DATA_HEADER
 {
-    /* Filename of the Tcl shared library, e.g., tcl86t.dll */
-    char tcl_libname[32];
+    /* Basename of the Tcl shared library, e.g., tcl86t.dll */
+    char tcl_shared_library_name[32];
 
-    /* Filename of the Tk shared library, e.g. tk86t.dll */
-    char tk_libname[32];
+    /* Basename of the Tk shared library, e.g. tk86t.dll */
+    char tk_shared_library_name[32];
 
-    /* Tk module library root, e.g. "tk/" */
-    char tk_lib[16];
+    /* Basename of the Tcl module directory, e.g. "tcl/" */
+    char tcl_module_directory_name[16];
+
+    /* Basename of the Tk module directory, e.g. "tk/" */
+    char tk_module_directory_name[16];
 
     /* Splash screen script */
     uint64_t script_len;
@@ -47,6 +65,9 @@ struct SPLASH_DATA_HEADER
      */
     uint64_t requirements_len;
     uint64_t requirements_offset;
+
+    /* Centering mode set at build time. */
+    uint32_t centering_mode;
 
     /*
      * Followed by a chunk of data, including the splash screen
@@ -88,12 +109,16 @@ struct SPLASH_CONTEXT
      * joinable threads. */
     bool thread_joinable;
 
-    /* The paths to Tcl/Tk shared libraries and Tk module library directory.
+    /* Path to top-level application directory */
+    char application_home_dir[PYI_PATH_MAX];
+
+    /* The paths to Tcl/Tk shared libraries and module directories.
      * These are anchored to application's top-level directory (static
      * or temporary, depending on onedir vs. onefile mode). */
-    char tcl_libpath[PYI_PATH_MAX];
-    char tk_libpath[PYI_PATH_MAX];
-    char tk_lib[PYI_PATH_MAX];
+    char tcl_shared_library[PYI_PATH_MAX];
+    char tk_shared_library[PYI_PATH_MAX];
+    char tcl_modules_dir[PYI_PATH_MAX];
+    char tk_modules_dir[PYI_PATH_MAX];
 
     /* The Tcl script that creates splash screen and the IPC mechanism
      * to communicate with python code. */
@@ -117,19 +142,28 @@ struct SPLASH_CONTEXT
     /* Structure that encapsulates loaded Tcl and Tk shared library and
      * pointers to imported functions. */
     struct DYLIB_TCLTK *dylib_tcltk;
+
+    /* Splash screen centering mode; see SPLASH_CENTER_MODE enum. */
+    int centering_mode;
 };
 
 typedef int (pyi_splash_event_proc)(struct SPLASH_CONTEXT *, const void *);
 
 struct PYI_CONTEXT;
 
+/* Platform-specific implementation of advanced centering modes */
+#if defined(_WIN32)
+int _pyi_splash_setup_centering_mode_win32(int mode, int *x, int *y, int *width, int *height);
+#elif !defined(__APPLE__)
+int _pyi_splash_setup_centering_mode_x11(int mode, int *x, int *y, int *width, int *height);
+#endif
 
 /**
  * Public API functions for pyi_splash
  */
 int pyi_splash_setup(struct SPLASH_CONTEXT *splash, const struct PYI_CONTEXT *pyi_ctx);
 
-int pyi_splash_load_shared_libaries(struct SPLASH_CONTEXT *splash);
+int pyi_splash_load_shared_libraries(struct SPLASH_CONTEXT *splash);
 int pyi_splash_finalize(struct SPLASH_CONTEXT *splash);
 int pyi_splash_start(struct SPLASH_CONTEXT *splash, const char *executable);
 

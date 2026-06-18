@@ -19,8 +19,10 @@ import re
 
 import pytest
 
+from PyInstaller import isolated
 from PyInstaller.compat import is_cygwin, is_darwin, is_termux, is_win
-from PyInstaller.utils.tests import importorskip, importable, skipif, xfail, onedir_only, onefile_only
+from PyInstaller.utils.tests import importorskip, skipif, xfail, onedir_only, onefile_only
+from PyInstaller.utils.hooks import can_import_module
 
 
 def test_run_from_path_environ(pyi_builder):
@@ -48,8 +50,12 @@ def test_absolute_python_path(pyi_builder):
 @pytest.mark.parametrize('enable_splash', [False, True], ids=['nosplash', 'splash'])
 def test_symlink_basename_is_kept(pyi_builder, tmp_path, enable_splash):
     if enable_splash:
-        if not importable("tkinter"):
-            pytest.skip("Needs tkinter")
+        # PyInstaller.utils.tests.importorskip('tkinter') ends up checking if the module's spec exists, but does not
+        # actually try to import the module. So we need to use `can_import_module()` hook utility function instead,
+        # which does try to import the module, and catches errors when _tkinter is unavailable or cannot be loaded due
+        # to broken dependencies.
+        if not can_import_module("tkinter"):
+            pytest.skip("tkinter cannot be imported.")
         splash_image = pathlib.Path(__file__).parent / 'data' / 'splash' / 'image.png'
         extra_args = ['--splash', str(splash_image)]
     else:
@@ -214,19 +220,70 @@ def test_module__file__attribute(pyi_builder):
 
 
 def test_module_attributes(tmp_path, pyi_builder):
-    # Create a text file with path to the python executable and contents of PATH.
-    # The frozen test program uses this information to spawn python interpreter to obtain attributes of the test modules
-    # when running unfrozen, which it then compares to the attributes of the test modules within the frozen test
-    # application itself.
-    parameters_file = tmp_path / 'python_exe.txt'
-    with open(parameters_file, 'w', encoding='utf8') as f:
-        f.write(sys.executable + "\n")
-        f.write(os.environ.get('PATH') + '\n')
+    # Modules to test
+    MODULE_NAMES = [
+        "xml.etree.ElementTree",  # pure-Python module
+        "xml.etree.cElementTree",  # binary extension
+    ]
 
-    pyi_builder.test_script(
-        'pyi_module_attributes.py',
-        app_args=[str(parameters_file)],
+    # Get module attributes in unfrozen python
+    @isolated.decorate
+    def _module_attributes(module_names):
+        import importlib
+
+        output = {}
+        for module_name in module_names:
+            module = importlib.import_module(module_name)
+            output[module_name] = sorted(dir(module))
+
+        return output
+
+    output_unfrozen = _module_attributes(MODULE_NAMES)
+
+    # Get attributes in frozen test
+    output_file = tmp_path / "output.json"
+    app_args = [str(output_file), *MODULE_NAMES]
+
+    pyi_args = []
+    for module_name in MODULE_NAMES:
+        pyi_args += ['--hidden-import', module_name]
+
+    pyi_builder.test_source(
+        """
+        import importlib
+        import json
+        import sys
+
+        if len(sys.argv) < 3:
+            print(f"Usage: {sys.argv[0]} <output_filename> <module_name> [module_name] [...]")
+            sys.exit(1)
+
+        output_filename = sys.argv[1]
+        module_names = sys.argv[2:]
+
+        output = {}
+        for module_name in module_names:
+            module = importlib.import_module(module_name)
+            output[module_name] = sorted(dir(module))
+
+        with open(output_filename, "w") as fp:
+            json.dump(output, fp)
+        """,
+        pyi_args=pyi_args,
+        app_args=app_args,
     )
+
+    with open(output_file, 'r') as fp:
+        import json
+        output_frozen = json.load(fp)
+
+    for module_name in MODULE_NAMES:
+        print("", file=sys.stderr)
+        print(f"Comparing attributes of {module_name!r}:", file=sys.stderr)
+        print(f"Unfrozen: {output_unfrozen[module_name]!r}", file=sys.stderr)
+        print(f"Frozen: {output_frozen[module_name]}", file=sys.stderr)
+
+        assert output_frozen[module_name] == output_unfrozen[module_name]
 
 
 def test_module_reload(pyi_builder):
@@ -595,9 +652,14 @@ def test_hook_collect_submodules(pyi_builder, script_dir):
     )
 
 
-# Test that PyInstaller can handle a script with an arbitrary extension.
-def test_arbitrary_ext(pyi_builder):
+# Test that PyInstaller can handle a script with an arbitrary extension/suffix.
+def test_arbitrary_entry_point_script_suffix(pyi_builder):
     pyi_builder.test_script('pyi_arbitrary_ext.foo')
+
+
+# Test that PyInstaller can handle a script with no extension/suffix.
+def test_no_entry_point_script_suffix(pyi_builder):
+    pyi_builder.test_script('pyi_no_ext')
 
 
 @onefile_only
